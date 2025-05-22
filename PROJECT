@@ -10,4 +10,14 @@ plugins:
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: kafka
 repo: github.com/w6d-io/kafka
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kafka.w6d.io
+  group: kafka
+  kind: KafkaTopic
+  path: github.com/w6d-io/kafka/api/v1alpha1
+  version: v1alpha1
 version: "3"
