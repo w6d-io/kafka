@@ -19,12 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"net"
 	"strconv"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/google/uuid"
+	kafka "github.com/segmentio/kafka-go"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

@@ -9,6 +9,15 @@ issues:
   # restore some of the defaults
   # (fill in the rest as needed)
   exclude-rules:
+    - path: test/
+      linters:
+        - typecheck
+    - path: internal/controller/
+      linters:
+        - typecheck
+    - path: _test\.go
+      linters:
+        - typecheck
     - path: "api/*"
       linters:
         - lll

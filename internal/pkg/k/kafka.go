@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	kafka "github.com/segmentio/kafka-go"
 )
 
 func CreateKafkaConnection(ctx context.Context, bootstrapServer string) (*kafka.Conn, error) {

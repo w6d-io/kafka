@@ -1,3 +1,6 @@
+//go:build test
+// +build test
+
 /*
 Copyright 2025 WILDCARD.
 
