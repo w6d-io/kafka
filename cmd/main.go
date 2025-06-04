@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -37,13 +38,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kafkav1alpha1 "github.com/w6d-io/kafka/api/v1alpha1"
+	"github.com/w6d-io/kafka/internal/config"
 	"github.com/w6d-io/kafka/internal/controller"
+	"github.com/w6d-io/x/logx"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	setupLog = logx.WithName(context.Background(), "main.command")
 )
 
 func init() {
@@ -163,7 +166,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager", "version", config.Version)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
