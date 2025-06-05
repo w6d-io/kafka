@@ -78,7 +78,7 @@ jobs:
       - name: Set up Kind
         uses: helm/kind-action@v1
         with:
-          cluster_name: test-cluster
+          cluster_name: kind
           kubectl_version: v1.31.0
 
       - name: Wait for cluster to be ready
