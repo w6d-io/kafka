@@ -171,6 +171,55 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
+##@ Security
+
+.PHONY: security-scan-all
+security-scan-all: chart-security-scan govulncheck gosec ## Run all security scans
+	@echo "All security scans completed"
+
+.PHONY: govulncheck
+govulncheck: ## Run Go vulnerability check
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "Installing govulncheck..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	govulncheck ./...
+
+.PHONY: gosec
+gosec: ## Run gosec security scanner
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+	fi
+	gosec ./...
+
+.PHONY: gosec-sarif
+gosec-sarif: ## Run gosec and output SARIF
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+	fi
+	@mkdir -p dist
+	gosec -fmt sarif -out dist/gosec-results.sarif ./...
+
+.PHONY: hadolint
+hadolint: ## Run Dockerfile linter
+	@if ! command -v hadolint >/dev/null 2>&1; then \
+		echo "Installing hadolint..."; \
+		OS=$(uname -s | tr '[:upper:]' '[:lower:]') && \
+		ARCH=$(uname -m | sed 's/x86_64/x86_64/') && \
+		curl -sL "https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-${OS}-${ARCH}" -o $(LOCALBIN)/hadolint && \
+		chmod +x $(LOCALBIN)/hadolint; \
+	fi
+	$(LOCALBIN)/hadolint Dockerfile
+
+.PHONY: security-install-tools
+security-install-tools: checkov ## Install all security tools
+	@echo "Installing security tools..."
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	@echo "Security tools installed"
+
 ##@ Deployment
 
 ifndef ignore-not-found
