@@ -64,6 +64,25 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
+  chart-test:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'charts/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.6.1
+
+      - name: Sync CRDs and test charts
+        run: |
+          make chart-sync-crds
+          ct lint --config .github/ct.yaml
+
   e2e-test:
     runs-on: ubuntu-latest
     needs: test
@@ -91,6 +110,13 @@ jobs:
 
       - name: Run e2e tests
         run: make test-e2e
+
+      - name: Test chart installation
+        run: |
+          make docker-build
+          kind load docker-image ghcr.io/w6d-io/kafka:0.1.0 --name kind
+          make chart-install
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kafka-operator --timeout=60s
 
   build:
     runs-on: ubuntu-latest

@@ -1,0 +1,37 @@
+# Helm lint configuration
+rules:
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+    min-spaces-inside-empty: -1
+    max-spaces-inside-empty: -1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+    min-spaces-inside-empty: -1
+    max-spaces-inside-empty: -1
+  colons:
+    max-spaces-before: -1
+    min-spaces-after: 1
+    max-spaces-after: 1
+  commas:
+    max-spaces-before: -1
+    min-spaces-after: 1
+    max-spaces-after: 1
+  comments: disable
+  comments-indentation: disable
+  document-start: disable
+  empty-lines:
+    max: 3
+    max-start: 0
+    max-end: 0
+  hyphens:
+    max-spaces-after: 1
+  indentation:
+    spaces: consistent
+    indent-sequences: true
+    check-multi-line-strings: false
+  key-duplicates: enable
+  line-length: disable
+  new-line-at-end-of-file: disable
+  type: safe

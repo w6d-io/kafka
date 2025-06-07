@@ -6,12 +6,13 @@ on:
     types:
       - closed
 
-# Add explicit permissions
 permissions:
   contents: write
   packages: write
   security-events: write
   pull-requests: read
+  pages: write
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -107,6 +108,40 @@ jobs:
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+
+  chart-release:
+    runs-on: ubuntu-latest
+    needs: [ build, security-scan ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Add chart dependencies
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add jetstack https://charts.jetstack.io
+
+      - name: Sync CRDs and update chart
+        run: |
+          make chart-sync-crds
+          make chart-update-version CHART_VERSION=${{ needs.build.outputs.version }}
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        with:
+          config: .github/cr.yaml
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
   release-drafter:
     runs-on: ubuntu-latest

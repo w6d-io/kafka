@@ -1,0 +1,15 @@
+# Configuration for chart-releaser
+# See https://github.com/helm/chart-releaser/blob/main/README.md
+
+owner: w6d-io
+git-repo: kafka
+charts-dir: charts
+charts-repo-url: https://w6d-io.github.io/kafka
+skip-existing: true
+make-release-latest: true
+generate-release-notes: true
+release-notes-file: ""
+commit: ""
+key: ""
+keyring: ""
+passphrase-file: ""
