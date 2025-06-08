@@ -72,8 +72,9 @@ affinity: {}
 # Operator configuration
 operator:
   logLevel: info
-  metricsAddr: ":8080"
-  probeAddr: ":8081"
+  listenAddress: ""
+  metricsPort: '8080'
+  probePort: "8081"
   leaderElection: true
 
 # RBAC configuration

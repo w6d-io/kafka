@@ -68,3 +68,17 @@ Create the manager image name
 {{- $tag := .Values.image.tag | default .Chart.AppVersion }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
+
+{{/*
+Create metrics bind address
+*/}}
+{{- define "kafka-operator.metricsAddress" -}}
+{{- printf "%s:%s" .Values.operator.listenAddress .Values.operator.metricsPort }}
+{{- end }}
+
+{{/*
+Create probe bind address
+*/}}
+{{- define "kafka-operator.probeAddress" -}}
+{{- printf "%s:%s" .Values.operator.listenAddress .Values.operator.probePort }}
+{{- end }}

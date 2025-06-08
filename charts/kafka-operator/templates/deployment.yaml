@@ -1,40 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "kafka-operator.fullname" . }}
+  name: {{ include "kafka-operator.fullname" .  | default "kafka-operator" }}
   labels:
-    {{- include "kafka-operator.labels" . | nindent 4 }}
+    control-plane: kafka-controller
+  {{- include "kafka-operator.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "kafka-operator.selectorLabels" . | nindent 6 }}
+      control-plane: kafka-controller
+    {{- include "kafka-operator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       labels:
-        {{- include "kafka-operator.selectorLabels" . | nindent 8 }}
+        control-plane: kafka-controller
+      {{- include "kafka-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      serviceAccountName: {{ include "kafka-operator.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: manager
           image: {{ include "kafka-operator.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /manager
           args:
             - --leader-elect={{ .Values.operator.leaderElection }}
-            - --metrics-bind-address={{ .Values.operator.metricsAddr }}
-            - --health-probe-bind-address={{ .Values.operator.probeAddr }}
+            - --metrics-bind-address={{ include "kafka-operator.metricsAddress" . }}
+            - --health-probe-bind-address={{ include "kafka-operator.probeAddress" . }}
             - --zap-log-level={{ .Values.operator.logLevel }}
           securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
