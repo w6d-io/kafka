@@ -29,7 +29,7 @@ jobs:
           check-latest: true
 
       - name: Set up chart-testing
-        uses: helm/chart-testing-action@v2.6.1
+        uses: helm/chart-testing-action@v2.7.0
 
       - name: Add chart dependencies
         run: |
@@ -39,9 +39,6 @@ jobs:
 
       - name: Sync CRDs to chart
         run: make chart-sync-crds
-
-      - name: Run chart-testing (list)
-        run: ct list --config .github/ct.yaml
 
       - name: Run chart-testing (lint)
         run: ct lint --config .github/ct.yaml

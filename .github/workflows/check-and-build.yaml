@@ -50,7 +50,7 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          GOBIN=./bin go install github.com/golangci/golangci-lint/cmd/golangci-lint
+          make golangci-lint
 
       - name: Run golangci-lint
         run: make lint
