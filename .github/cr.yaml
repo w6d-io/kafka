@@ -4,7 +4,7 @@
 owner: w6d-io
 git-repo: kafka
 charts-dir: charts
-charts-repo-url: https://w6d-io.github.io/kafka
+charts-repo-url: https://charts.w6d.io/kafka
 skip-existing: true
 make-release-latest: true
 generate-release-notes: true
@@ -13,3 +13,4 @@ commit: ""
 key: ""
 keyring: ""
 passphrase-file: ""
+sign: false
