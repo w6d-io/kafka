@@ -139,7 +139,7 @@ jobs:
           make docker-build
           kind load docker-image ghcr.io/w6d-io/kafka:0.1.0 --name kind
           make chart-install
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kafka-operator --timeout=60s
+          kubectl wait --for=condition=Ready pod --namespace kafka-operator-system -l app.kubernetes.io/name=kafka-operator --timeout=60s
 
   build:
     runs-on: ubuntu-latest
