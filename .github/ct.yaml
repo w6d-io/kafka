@@ -13,7 +13,7 @@ lint-conf: .github/lintconf.yaml
 validate-maintainers: true
 
 # Install configuration
-namespace: kafka-operator-system
+namespace: default
 release-label: app.kubernetes.io/instance
 upgrade: false
 skip-missing-values: false
