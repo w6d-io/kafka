@@ -61,6 +61,14 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+ifeq (,$(OS))
+OS=$(shell go env GOOS)
+endif
+
+ifeq (,$(ARCH))
+ARCH=$(shell go env GOARCH)
+endif
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -391,7 +399,7 @@ HELM_VERSION ?= v3.15.2
 CT_VERSION ?= v3.11.0
 CR_VERSION ?= v1.6.1
 KIND_VERSION ?= v0.32.0
-YQ_VERSION ?= v4.44.2
+YQ_VERSION ?= v4.45.4
 HELM_DOCS_VERSION ?= v1.14.2
 
 .PHONY: kustomize
@@ -469,8 +477,8 @@ $(YQ): $(LOCALBIN)
 	@{ \
 	set -e ;\
 	mkdir -p $(dir $(YQ)) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_${OS}_${ARCH} -o $(YQ) ;\
+	echo "https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(OS)_$(ARCH)" && \
+	curl -sSL "https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(OS)_$(ARCH)" -o $(YQ) ;\
 	chmod +x $(YQ) ;\
 	}
 
