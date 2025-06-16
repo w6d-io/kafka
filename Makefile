@@ -61,6 +61,14 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+ifeq (,$(OS))
+OS=$(shell go env GOOS)
+endif
+
+ifeq (,$(ARCH))
+ARCH=$(shell go env GOARCH)
+endif
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -96,7 +104,7 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=kafka-operator-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -171,6 +179,55 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
+##@ Security
+
+.PHONY: security-scan-all
+security-scan-all: chart-security-scan govulncheck gosec ## Run all security scans
+	@echo "All security scans completed"
+
+.PHONY: govulncheck
+govulncheck: ## Run Go vulnerability check
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "Installing govulncheck..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	govulncheck ./...
+
+.PHONY: gosec
+gosec: ## Run gosec security scanner
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+	fi
+	gosec ./...
+
+.PHONY: gosec-sarif
+gosec-sarif: ## Run gosec and output SARIF
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+	fi
+	@mkdir -p dist
+	gosec -fmt sarif -out dist/gosec-results.sarif ./...
+
+.PHONY: hadolint
+hadolint: ## Run Dockerfile linter
+	@if ! command -v hadolint >/dev/null 2>&1; then \
+		echo "Installing hadolint..."; \
+		OS=$(uname -s | tr '[:upper:]' '[:lower:]') && \
+		ARCH=$(uname -m | sed 's/x86_64/x86_64/') && \
+		curl -sL "https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-${OS}-${ARCH}" -o $(LOCALBIN)/hadolint && \
+		chmod +x $(LOCALBIN)/hadolint; \
+	fi
+	$(LOCALBIN)/hadolint Dockerfile
+
+.PHONY: security-install-tools
+security-install-tools: checkov ## Install all security tools
+	@echo "Installing security tools..."
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	@echo "Security tools installed"
+
 ##@ Deployment
 
 ifndef ignore-not-found
@@ -194,6 +251,125 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
+##@ Helm Charts
+
+# Chart configuration
+CHART_NAME ?= kafka-operator
+CHART_DIR ?= charts/$(CHART_NAME)
+CHARTS_DIR ?= charts
+CHART_VERSION ?= $(VERSION)
+
+##@ Chart CI/CD Integration
+
+.PHONY: ci-chart-test
+ci-chart-test: chart-sync-crds chart-lint ## Run chart tests for CI
+	@echo "Running chart tests for CI..."
+	$(CT) lint --config .github/ct.yaml
+	$(CT) install --config .github/ct.yaml
+
+.PHONY: ci-chart-release
+ci-chart-release: chart-sync-crds chart-update-version chart-package ## Prepare chart for release in CI
+	@echo "Chart prepared for release"
+
+.PHONY: chart-verify
+chart-verify: helm chart-sync-crds ## Verify chart integrity
+	$(HELM) lint $(CHART_DIR)
+	$(HELM) template test $(CHART_DIR) --validate > /dev/null
+	@echo "Chart verification passed"
+
+.PHONY: chart-security-scan
+chart-security-scan: helm ## Scan chart for security issues
+	@if command -v checkov >/dev/null 2>&1; then \
+		checkov -f $(CHART_DIR) --framework helm; \
+	else \
+		echo "Checkov not installed, skipping security scan"; \
+		echo "Install with: pip install checkov"; \
+	fi
+
+.PHONY: chart-sync-crds
+chart-sync-crds: manifests ## Sync CRDs to Helm chart
+	@mkdir -p $(CHART_DIR)/crds
+	cp config/crd/bases/*.yaml $(CHART_DIR)/crds/
+	@echo "CRDs synced to $(CHART_DIR)/crds/"
+
+.PHONY: chart-update-version
+chart-update-version: yq ## Update chart version and appVersion
+	file $(YQ)
+	cat $(YQ)
+	$(YQ) eval '.version = "$(CHART_VERSION)"' -i $(CHART_DIR)/Chart.yaml
+	$(YQ) eval '.appVersion = "$(VERSION)"' -i $(CHART_DIR)/Chart.yaml
+	@echo "Chart version updated to $(CHART_VERSION), appVersion updated to $(VERSION)"
+
+.PHONY: chart-deps
+chart-deps: helm ## Update chart dependencies
+	$(HELM) dependency update $(CHART_DIR)
+
+.PHONY: chart-lint
+chart-lint: helm chart-sync-crds ## Lint Helm chart
+	$(HELM) lint $(CHART_DIR)
+
+.PHONY: chart-test
+chart-test: ct kind-cluster ## Test Helm chart with chart-testing
+	$(CT) lint --config .github/ct.yaml --charts $(CHART_DIR)
+	$(CT) install --config .github/ct.yaml --charts $(CHART_DIR)
+
+.PHONY: chart-test-local
+chart-test-local: helm chart-sync-crds ## Test chart installation locally
+	$(HELM) template test $(CHART_DIR) --debug > /tmp/kafka-operator-template.yaml
+	@echo "Chart template rendered to /tmp/kafka-operator-template.yaml"
+	$(HELM) install kafka-operator-test $(CHART_DIR) --dry-run --debug
+
+.PHONY: chart-package
+chart-package: helm chart-sync-crds chart-update-version ## Package Helm chart
+	@mkdir -p dist/charts
+	$(HELM) package $(CHART_DIR) --destination dist/charts
+	@echo "Chart packaged in dist/charts/"
+
+.PHONY: chart-release
+chart-release: cr chart-package ## Release Helm chart using chart-releaser
+	$(CR) upload --config .github/cr.yaml
+	$(CR) index --config .github/cr.yaml
+
+.PHONY: chart-docs
+chart-docs: helm-docs ## Generate chart documentation
+	$(HELM_DOCS) --chart-search-root=$(CHARTS_DIR)
+
+.PHONY: chart-install
+chart-install: helm chart-sync-crds ## Install chart to current k8s cluster
+	$(HELM) upgrade --install kafka-operator $(CHART_DIR) \
+		--set image.tag=$(VERSION) \
+		--create-namespace \
+		--namespace kafka-operator-system
+
+.PHONY: chart-uninstall
+chart-uninstall: helm ## Uninstall chart from current k8s cluster
+	$(HELM) uninstall kafka-operator --namespace kafka-operator-system
+
+.PHONY: chart-debug
+chart-debug: helm chart-sync-crds ## Debug chart rendering
+	$(HELM) template kafka-operator $(CHART_DIR) \
+		--set image.tag=$(VERSION) \
+		--debug
+
+##@ Testing Infrastructure
+
+.PHONY: kind-cluster
+kind-cluster: kind ## Create kind cluster for testing
+	@if ! $(KIND) get clusters | grep -q "chart-testing"; then \
+		echo "Creating kind cluster for chart testing..."; \
+		$(KIND) create cluster --name chart-testing --config .github/kind-config.yaml; \
+	else \
+		echo "Kind cluster 'chart-testing' already exists"; \
+	fi
+
+.PHONY: kind-cluster-delete
+kind-cluster-delete: kind ## Delete kind cluster
+	$(KIND) delete cluster --name chart-testing
+
+.PHONY: kind-load-image
+kind-load-image: kind docker-build ## Load docker image into kind cluster
+	$(KIND) load docker-image $(IMG) --name chart-testing
+
 ##@ Dependencies
 
 ## Location to install dependencies to
@@ -207,48 +383,116 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELM ?= $(LOCALBIN)/helm
+CT ?= $(LOCALBIN)/ct
+CR ?= $(LOCALBIN)/cr
+KIND ?= $(LOCALBIN)/kind
+YQ ?= $(LOCALBIN)/yq
+HELM_DOCS ?= $(LOCALBIN)/helm-docs
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.1
 ENVTEST_VERSION ?= release-0.19
 GOLANGCI_LINT_VERSION ?= v1.59.1
+HELM_VERSION ?= v3.15.2
+CT_VERSION ?= v3.11.0
+CR_VERSION ?= v1.6.1
+KIND_VERSION ?= v0.32.0
+YQ_VERSION ?= v4.45.4
+HELM_DOCS_VERSION ?= v1.14.2
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+	@if test -x $(LOCALBIN)/kustomize && ! $(LOCALBIN)/kustomize version | grep -q $(KUSTOMIZE_VERSION); then \
+		echo "$(LOCALBIN)/kustomize version is not expected $(KUSTOMIZE_VERSION). Removing it before installing."; \
+		rm -rf $(LOCALBIN)/kustomize; \
+	fi
+	test -s $(LOCALBIN)/kustomize || GOBIN=$(LOCALBIN) GO111MODULE=on go install sigs.k8s.io/kustomize/kustomize/v5@$(KUSTOMIZE_VERSION)
 
 .PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.
 $(CONTROLLER_GEN): $(LOCALBIN)
-	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+	test -s $(LOCALBIN)/controller-gen && $(LOCALBIN)/controller-gen --version | grep -q $(CONTROLLER_TOOLS_VERSION) || \
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	test -s $(LOCALBIN)/golangci-lint || GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
-# $1 - target path with name of binary
-# $2 - package url which can be installed
-# $3 - specific version of package
-define go-install-tool
-@[ -f "$(1)-$(3)" ] || { \
-set -e; \
-package=$(2)@$(3) ;\
-echo "Downloading $${package}" ;\
-rm -f $(1) || true ;\
-GOBIN=$(LOCALBIN) go install $${package} ;\
-mv $(1) $(1)-$(3) ;\
-} ;\
-ln -sf $(1)-$(3) $(1)
-endef
+.PHONY: helm
+helm: $(HELM) ## Download helm locally if necessary.
+$(HELM): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(HELM)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSL https://get.helm.sh/helm-$(HELM_VERSION)-$${OS}-$${ARCH}.tar.gz | tar -xzC $(LOCALBIN) --strip-components=1 $${OS}-$${ARCH}/helm ;\
+	chmod +x $(HELM) ;\
+	}
+
+.PHONY: ct
+ct: $(CT) ## Download chart-testing locally if necessary.
+$(CT): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(CT)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSL https://github.com/helm/chart-testing/releases/download/$(CT_VERSION)/chart-testing_$(CT_VERSION:v%=%)_$${OS}_$${ARCH}.tar.gz | tar -xzC $(LOCALBIN) ct ;\
+	chmod +x $(CT) ;\
+	}
+
+.PHONY: cr
+cr: $(CR) ## Download chart-releaser locally if necessary.
+$(CR): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(CR)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSL https://github.com/helm/chart-releaser/releases/download/$(CR_VERSION)/chart-releaser_$(CR_VERSION:v%=%)_${OS}_${ARCH}.tar.gz | tar -xzC $(LOCALBIN) cr ;\
+	chmod +x $(CR) ;\
+	}
+
+.PHONY: kind
+kind: $(KIND) ## Download kind locally if necessary.
+$(KIND): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(KIND)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSL https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-${OS}-${ARCH} -o $(KIND) ;\
+	chmod +x $(KIND) ;\
+	}
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(YQ)) ;\
+	echo "https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(OS)_$(ARCH)" && \
+	curl -sSL "https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(OS)_$(ARCH)" -o $(YQ) ;\
+	chmod +x $(YQ) ;\
+	}
+
+.PHONY: helm-docs
+helm-docs: $(HELM_DOCS) ## Download helm-docs locally if necessary.
+$(HELM_DOCS): $(LOCALBIN)
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(HELM_DOCS)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSL https://github.com/norwoodj/helm-docs/releases/download/$(HELM_DOCS_VERSION)/helm-docs_$(HELM_DOCS_VERSION:v%=%)_${OS}_${ARCH}.tar.gz | tar -xzC $(LOCALBIN) helm-docs ;\
+	chmod +x $(HELM_DOCS) ;\
+	}
+
 
 .PHONY: operator-sdk
 OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
@@ -259,7 +503,7 @@ ifeq (, $(shell which operator-sdk 2>/dev/null))
 	set -e ;\
 	mkdir -p $(dir $(OPERATOR_SDK)) ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH} ;\
+	curl -sSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_${OS}_${ARCH} ;\
 	chmod +x $(OPERATOR_SDK) ;\
 	}
 else

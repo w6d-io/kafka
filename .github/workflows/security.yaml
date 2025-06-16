@@ -1,0 +1,108 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run weekly security scans
+    - cron: '0 2 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+#  code-security:
+#    name: Code Security Analysis
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v5
+#        with:
+#          go-version: '1.24'
+#
+#      - name: Run Gosec Security Scanner
+#        uses: securecodewarrior/github-action-gosec@master
+#        with:
+#          args: '-fmt sarif -out gosec-results.sarif ./...'
+#
+#      - name: Upload Gosec scan results
+#        uses: github/codeql-action/upload-sarif@v3
+#        if: always()
+#        with:
+#          sarif_file: gosec-results.sarif
+#          category: gosec
+#
+#  chart-security:
+#    name: Helm Chart Security Analysis
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Set up Python
+#        uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.11'
+#
+#      - name: Sync CRDs to charts
+#        run: make chart-sync-crds
+#
+#      - name: Run chart security scan
+#        run: make chart-security-scan-sarif
+#
+#      - name: Upload chart security scan results
+#        uses: github/codeql-action/upload-sarif@v3
+#        if: always()
+#        with:
+#          sarif_file: dist/checkov-chart.sarif
+#          category: helm-charts
+#
+#  dependency-security:
+#    name: Dependency Security Analysis
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v5
+#        with:
+#          go-version: '1.24'
+#
+#      - name: Run Nancy vulnerability scanner
+#        uses: sonatypecommunity/nancy-github-action@main
+#        with:
+#          nancyCommand: sleuth
+#
+#      - name: Run Govulncheck
+#        run: |
+#          go install golang.org/x/vuln/cmd/govulncheck@latest
+#          govulncheck ./...
+
+  dockerfile-security:
+    name: Dockerfile Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          format: sarif
+          output-file: hadolint-results.sarif
+
+      - name: Upload Hadolint scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: hadolint-results.sarif
+          category: dockerfile

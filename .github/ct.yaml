@@ -1,0 +1,24 @@
+# Configuration for chart-testing
+# See https://github.com/helm/chart-testing/blob/main/doc/ct_lint-and-install.md
+
+# Lint configuration
+target-branch: main
+chart-dirs:
+  - charts
+chart-repos:
+  - bitnami=https://charts.bitnami.com/bitnami
+  - jetstack=https://charts.jetstack.io
+excluded-charts: []
+lint-conf: .github/lintconf.yaml
+validate-maintainers: true
+
+# Install configuration
+namespace: default
+release-label: app.kubernetes.io/instance
+upgrade: false
+skip-missing-values: false
+helm-extra-args: "--timeout 300s"
+
+# Testing configuration
+check-version-increment: true
+debug: false

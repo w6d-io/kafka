@@ -1,8 +1,9 @@
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: kafka-operator-role
+  name: {{ include "kafka-operator.fullname" . }}-kafkatopic-editor-role
+  labels:
+  {{- include "kafka-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - kafka.kafka.w6d.io
@@ -19,14 +20,6 @@ rules:
 - apiGroups:
   - kafka.kafka.w6d.io
   resources:
-  - kafkatopics/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - kafka.kafka.w6d.io
-  resources:
   - kafkatopics/status
   verbs:
   - get
-  - patch
-  - update
