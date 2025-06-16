@@ -286,6 +286,8 @@ chart-sync-crds: manifests ## Sync CRDs to Helm chart
 
 .PHONY: chart-update-version
 chart-update-version: yq ## Update chart version and appVersion
+	file $(YQ)
+	cat $(YQ)
 	$(YQ) eval '.version = "$(CHART_VERSION)"' -i $(CHART_DIR)/Chart.yaml
 	$(YQ) eval '.appVersion = "$(VERSION)"' -i $(CHART_DIR)/Chart.yaml
 	@echo "Chart version updated to $(CHART_VERSION), appVersion updated to $(VERSION)"
