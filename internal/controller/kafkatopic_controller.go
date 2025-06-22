@@ -19,17 +19,15 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	kafka "github.com/segmentio/kafka-go"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +35,7 @@ import (
 
 	kafkav1alpha1 "github.com/w6d-io/kafka/api/v1alpha1"
 	"github.com/w6d-io/kafka/internal/pkg/k"
+	"github.com/w6d-io/kafka/internal/types"
 	"github.com/w6d-io/x/logx"
 )
 
@@ -46,9 +45,9 @@ type KafkaTopicReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=kafka.kafka.w6d.io,resources=kafkatopics,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=kafka.kafka.w6d.io,resources=kafkatopics/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=kafka.kafka.w6d.io,resources=kafkatopics/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kafka.w6d.io,resources=kafkatopics,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kafka.w6d.io,resources=kafkatopics/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kafka.w6d.io,resources=kafkatopics/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -102,7 +101,7 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Create Kafka connection
-	conn, err := k.CreateKafkaConnection(ctx, *kafkaTopic.Spec.BoostrapServer)
+	kafkaClient, err := k.CreateKafkaConnection(ctx, *kafkaTopic.Spec.BoostrapServer)
 	if err != nil {
 		log.Error(err, "Failed to create Kafka connection")
 		if err := r.UpdateStatus(ctx, req.NamespacedName, kafkav1alpha1.KafkaTopicStatus{
@@ -118,52 +117,22 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 2}, err
 	}
-	defer func(conn *kafka.Conn) {
-		err := conn.Close()
-		if err != nil {
-			log.Error(err, "connection close failed")
-		}
-	}(conn)
+	defer kafkaClient.Close()
+	admin := kadm.NewClient(kafkaClient)
+	defer admin.Close()
+	topicDetails, err := admin.ListTopics(ctx)
 
-	// Get existing topics to avoid recreation
-	partitions, err := conn.ReadPartitions()
 	if err != nil {
-		log.Error(err, "Failed to read existing partitions")
-		if err := r.UpdateStatus(ctx, req.NamespacedName, kafkav1alpha1.KafkaTopicStatus{
-			State: kafkav1alpha1.Failed,
-			Message: fmt.Sprintf(
-				"Failed to read existing partitions, please check bootstrap server %s/%s",
-				kafkaTopic.Namespace,
-				kafkaTopic.Name,
-			),
-		}); err != nil {
-			log.Error(err, "Failed to read existing partitions")
-		}
-		return ctrl.Result{RequeueAfter: time.Minute * 2}, err
-	}
-
-	// Create a set of existing topics
-	existingTopics := make(map[string]bool)
-	for _, partition := range partitions {
-		existingTopics[partition.Topic] = true
+		log.Error(err, "failed to list topics")
+		return ctrl.Result{RequeueAfter: time.Second * 5}, err
 	}
 
 	// Prepare topics to create
-	var topicsToCreate []kafka.TopicConfig
+	var topicsToCreate []types.Topic
 	for _, topic := range *kafkaTopic.Spec.Topics {
-		if !existingTopics[topic.Topic] {
-			topicConfig := kafka.TopicConfig{
-				Topic: topic.Topic,
+		if !topicDetails.Has(topic.Topic) {
 
-				NumPartitions:     int(topic.Partition),
-				ReplicationFactor: int(topic.Replica),
-				ConfigEntries:     []kafka.ConfigEntry{
-					// Add default configurations if needed
-					// {ConfigName: "cleanup.policy", ConfigValue: "delete"},
-					// {ConfigName: "retention.ms", ConfigValue: "604800000"}, // 7 days
-				},
-			}
-			topicsToCreate = append(topicsToCreate, topicConfig)
+			topicsToCreate = append(topicsToCreate, topic)
 			log.Info("Preparing to create topic", "topic", topic.Topic, "partitions", topic.Partition, "replicas", topic.Replica)
 		} else {
 			log.Info("Topic already exists, skipping", "topic", topic.Topic)
@@ -172,15 +141,16 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Create the topics if any need to be created
 	if len(topicsToCreate) > 0 {
-		err = conn.CreateTopics(topicsToCreate...)
+		err = k.CreateTopics(ctx, admin, topicsToCreate...)
 		if err != nil {
 			log.Error(err, "Failed to create topics")
 			if err := r.UpdateStatus(ctx, req.NamespacedName, kafkav1alpha1.KafkaTopicStatus{
 				State: kafkav1alpha1.Failed,
 				Message: fmt.Sprintf(
-					"Failed to create topics, please check bootstrap server %s/%s",
+					"Failed to create topic %s/%s. error: %s",
 					kafkaTopic.Namespace,
 					kafkaTopic.Name,
+					err.Error(),
 				),
 			}); err != nil {
 				log.Error(err, "Failed to create topics")
@@ -193,7 +163,7 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Verify topics were created successfully
 	if len(topicsToCreate) > 0 {
-		if err := k.VerifyTopicsCreated(ctx, conn, topicsToCreate); err != nil {
+		if err := k.VerifyTopicsCreated(ctx, admin, topicsToCreate); err != nil {
 			log.Error(err, "Failed to verify topic creation")
 			if err := r.UpdateStatus(ctx, req.NamespacedName, kafkav1alpha1.KafkaTopicStatus{
 				State: kafkav1alpha1.Failed,
@@ -209,56 +179,17 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	// Update status to reflect current state
-	kafkaTopic.Status = kafkav1alpha1.KafkaTopicStatus{
-		// Add status fields as needed - you might want to add:
-		// CreatedTopics: []string{...},
-		// LastReconciled: metav1.Now(),
-		// Status: "Ready",
+	if err = r.UpdateStatus(ctx, req.NamespacedName, kafkav1alpha1.KafkaTopicStatus{
+		State: kafkav1alpha1.Succeeded,
+		Message: fmt.Sprintf(
+			"Successfully created topics %s/%s",
+			kafkaTopic.Namespace,
+			kafkaTopic.Name,
+		),
+	}); err != nil {
+		return ctrl.Result{RequeueAfter: time.Second * 5}, err
 	}
-
-	if err := r.Status().Update(ctx, &kafkaTopic); err != nil {
-		log.Error(err, "Failed to update KafkaTopic status")
-		return ctrl.Result{}, err
-	}
-
 	return ctrl.Result{}, nil
-}
-
-func (r *KafkaTopicReconciler) createKafkaConnection(ctx context.Context, bootstrapServer string) (*kafka.Conn, error) {
-	// Parse the bootstrap server to get host and port
-	host, port, err := net.SplitHostPort(bootstrapServer)
-	if err != nil {
-		// If no port specified, assume default Kafka port
-		host = bootstrapServer
-		port = "9092"
-	}
-
-	// Convert port to int
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port: %w", err)
-	}
-
-	// Create connection with timeout
-	dialer := &kafka.Dialer{
-		Timeout:   10 * time.Second,
-		DualStack: true,
-		// Configure TLS if needed
-		// TLS: &tls.Config{},
-		// Configure SASL if needed
-		// SASLMechanism: plain.Mechanism{
-		//     Username: "username",
-		//     Password: "password",
-		// },
-	}
-
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(portInt)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial kafka: %w", err)
-	}
-
-	return conn, nil
 }
 
 func (r *KafkaTopicReconciler) GetStatus(state kafkav1alpha1.State) metav1.ConditionStatus {
@@ -272,7 +203,7 @@ func (r *KafkaTopicReconciler) GetStatus(state kafkav1alpha1.State) metav1.Condi
 	}
 }
 
-func (r *KafkaTopicReconciler) UpdateStatus(ctx context.Context, nn types.NamespacedName, status kafkav1alpha1.KafkaTopicStatus) error {
+func (r *KafkaTopicReconciler) UpdateStatus(ctx context.Context, nn k8stypes.NamespacedName, status kafkav1alpha1.KafkaTopicStatus) error {
 	log := logx.WithName(ctx, "KafkaTopicReconciler.UpdateStatus").WithValues("resource", nn, "status", status)
 	log.V(1).Info("update status")
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {

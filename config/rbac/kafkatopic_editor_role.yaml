@@ -8,7 +8,7 @@ metadata:
   name: kafkatopic-editor-role
 rules:
 - apiGroups:
-  - kafka.kafka.w6d.io
+  - kafka.w6d.io
   resources:
   - kafkatopics
   verbs:
@@ -20,7 +20,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kafka.kafka.w6d.io
+  - kafka.w6d.io
   resources:
   - kafkatopics/status
   verbs:

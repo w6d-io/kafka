@@ -16,7 +16,7 @@ Created on 01/06/2025
 package types
 
 type Topic struct {
-	Replica   int32  `json:"replica"`
+	Replica   int16  `json:"replica"`
 	Partition int32  `json:"partition"`
 	Topic     string `json:"topic"`
 }

@@ -6,7 +6,7 @@ metadata:
   {{- include "kafka-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
-  - kafka.kafka.w6d.io
+  - kafka.w6d.io
   resources:
   - kafkatopics
   verbs:
@@ -18,13 +18,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kafka.kafka.w6d.io
+  - kafka.w6d.io
   resources:
   - kafkatopics/finalizers
   verbs:
   - update
 - apiGroups:
-  - kafka.kafka.w6d.io
+  - kafka.w6d.io
   resources:
   - kafkatopics/status
   verbs:
@@ -41,7 +41,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: '{{ include "kafka-operator.fullname" . }}-kafka-operator-role'
+  name: kafka-operator-role
 subjects:
 - kind: ServiceAccount
   name: '{{ include "kafka-operator.fullname" .  | default "kafka-operator" }}'

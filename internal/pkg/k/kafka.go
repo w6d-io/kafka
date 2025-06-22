@@ -17,73 +17,87 @@ package k
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net"
-	"strconv"
+	"strings"
 	"time"
 
-	kafka "github.com/segmentio/kafka-go"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/w6d-io/kafka/internal/types"
+	"github.com/w6d-io/x/logx"
 )
 
-func CreateKafkaConnection(ctx context.Context, bootstrapServer string) (*kafka.Conn, error) {
-	// Parse the bootstrap server to get host and port
-	host, port, err := net.SplitHostPort(bootstrapServer)
+func CreateKafkaConnection(ctx context.Context, bootstrapServer string) (*kgo.Client, error) {
+
+	log := logx.WithName(ctx, "CreateKafkaConnection")
+	log.Info("Create Kafka connection", "bootstrapServer", bootstrapServer)
+	var opts []kgo.Opt
+	opts = append(opts,
+		kgo.SeedBrokers(strings.Split(bootstrapServer, ",")...),
+	)
+
+	client, err := kgo.NewClient(opts...)
+
 	if err != nil {
-		// If no port specified, assume default Kafka port
-		host = bootstrapServer
-		port = "9092"
+		return nil, fmt.Errorf("unable to create kafka client: %s", err.Error())
 	}
 
-	// Convert port to int
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port: %w", err)
+	if err = client.Ping(context.Background()); err != nil {
+		return nil, fmt.Errorf("unable to ping cluster: %s", err.Error())
 	}
-
-	// Create connection with timeout
-	dialer := &kafka.Dialer{
-		Timeout:   10 * time.Second,
-		DualStack: true,
-		// Configure TLS if needed
-		// TLS: &tls.Config{},
-		// Configure SASL if needed
-		// SASLMechanism: plain.Mechanism{
-		//     Username: "username",
-		//     Password: "password",
-		// },
-	}
-
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(portInt)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial kafka: %w", err)
-	}
-
-	return conn, nil
+	return client, nil
 }
 
 // VerifyTopicsCreated verifies that the topics were successfully created
-func VerifyTopicsCreated(_ context.Context, conn *kafka.Conn, createdTopics []kafka.TopicConfig) error {
+func VerifyTopicsCreated(ctx context.Context, admin *kadm.Client, createdTopics []types.Topic) error {
+	log := logx.WithName(ctx, "VerifyTopicsCreated")
 	// Wait a bit for topics to be created
 	time.Sleep(2 * time.Second)
 
-	// Re-read partitions to verify creation
-	partitions, err := conn.ReadPartitions()
+	topicDetails, err := admin.ListTopics(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to read partitions for verification: %w", err)
-	}
-
-	// Create a map of existing topics
-	existingTopics := make(map[string]bool)
-	for _, partition := range partitions {
-		existingTopics[partition.Topic] = true
+		log.Error(err, "Unable to list topics")
+		return err
 	}
 
 	// Check if all created topics exist
 	for _, topic := range createdTopics {
-		if !existingTopics[topic.Topic] {
+		if !topicDetails.Has(topic.Topic) {
 			return fmt.Errorf("topic %s was not created successfully", topic.Topic)
 		}
 	}
 
+	return nil
+}
+
+func CreateTopics(ctx context.Context, admin *kadm.Client, topics ...types.Topic) error {
+	log := logx.WithName(ctx, "createTopic")
+	topicDetails, err := admin.ListTopics(ctx)
+	if err != nil {
+		log.Error(err, "Unable to list topics")
+		return err
+	}
+	var e []error
+	for _, topic := range topics {
+		if !topicDetails.Has(topic.Topic) {
+			resp, _ := admin.CreateTopics(ctx, topic.Partition, topic.Replica, nil, topic.Topic)
+			for _, ctr := range resp {
+				if ctr.Err != nil {
+					log.Error(ctr.Err, "Unable to create topic", "topic", ctr.Topic)
+					e = append(e, fmt.Errorf("unable to create topic %s", ctr.Err.Error()))
+					continue
+				} else {
+					log.Info("Topic created", "topic", ctr.Topic)
+				}
+			}
+		} else {
+			log.Info("Topic already exists", "topic", topic)
+		}
+	}
+	if len(e) > 0 {
+		return errors.Join(e...)
+	}
 	return nil
 }
