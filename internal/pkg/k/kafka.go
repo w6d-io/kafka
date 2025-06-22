@@ -29,8 +29,10 @@ import (
 	"github.com/w6d-io/x/logx"
 )
 
-func CreateKafkaConnection(_ context.Context, bootstrapServer string) (*kgo.Client, error) {
+func CreateKafkaConnection(ctx context.Context, bootstrapServer string) (*kgo.Client, error) {
 
+	log := logx.WithName(ctx, "CreateKafkaConnection")
+	log.Info("Create Kafka connection", "bootstrapServer", bootstrapServer)
 	var opts []kgo.Opt
 	opts = append(opts,
 		kgo.SeedBrokers(strings.Split(bootstrapServer, ",")...),

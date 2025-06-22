@@ -60,7 +60,6 @@ spec:
                       format: int32
                       type: integer
                     replica:
-                      format: int32
                       type: integer
                     topic:
                       type: string
