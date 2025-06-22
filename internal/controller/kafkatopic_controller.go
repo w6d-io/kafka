@@ -32,11 +32,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kafkav1alpha1 "github.com/w6d-io/kafka/api/v1alpha1"
 	"github.com/w6d-io/kafka/internal/pkg/k"
 	"github.com/w6d-io/kafka/internal/types"
 	"github.com/w6d-io/x/logx"
+)
+
+const (
+	KafkaTopicFinalizer = "kafka.w6d.io/topic-finalizer"
 )
 
 // KafkaTopicReconciler reconciles a KafkaTopic object
@@ -77,6 +82,40 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Error(err, "Failed to get KafkaTopic")
 		return ctrl.Result{}, err
 	}
+
+	// Handle deletion
+	if kafkaTopic.ObjectMeta.DeletionTimestamp != nil {
+		if controllerutil.ContainsFinalizer(&kafkaTopic, KafkaTopicFinalizer) {
+			log.Info("Deleting KafkaTopic resource, cleaning up topics")
+
+			// Perform cleanup
+			if err := r.cleanupTopics(ctx, &kafkaTopic); err != nil {
+				log.Error(err, "Failed to cleanup topics")
+				return ctrl.Result{RequeueAfter: time.Minute * 1}, err
+			}
+
+			// Remove finalizer to allow deletion
+			controllerutil.RemoveFinalizer(&kafkaTopic, KafkaTopicFinalizer)
+			if err := r.Update(ctx, &kafkaTopic); err != nil {
+				log.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+			log.Info("Successfully cleaned up topics and removed finalizer")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(&kafkaTopic, KafkaTopicFinalizer) {
+		controllerutil.AddFinalizer(&kafkaTopic, KafkaTopicFinalizer)
+		if err := r.Update(ctx, &kafkaTopic); err != nil {
+			log.Error(err, "Failed to add finalizer")
+			return ctrl.Result{}, err
+		}
+		log.Info("Added finalizer to KafkaTopic resource")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// Check if bootstrap server is specified
 	if kafkaTopic.Spec.BoostrapServer == nil || *kafkaTopic.Spec.BoostrapServer == "" {
 		log.Error(fmt.Errorf("bootstrap server not specified"), "Bootstrap server is required")
@@ -190,6 +229,63 @@ func (r *KafkaTopicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: time.Second * 5}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// cleanupTopics handles the cleanup of Kafka topics when the KafkaTopic resource is being deleted
+func (r *KafkaTopicReconciler) cleanupTopics(ctx context.Context, kafkaTopic *kafkav1alpha1.KafkaTopic) error {
+	log := logx.WithName(ctx, "cleanupTopics")
+
+	// Skip cleanup if no bootstrap server or topics are specified
+	if kafkaTopic.Spec.BoostrapServer == nil || *kafkaTopic.Spec.BoostrapServer == "" {
+		log.Info("No bootstrap server specified, skipping topic cleanup")
+		return nil
+	}
+
+	if kafkaTopic.Spec.Topics == nil || len(*kafkaTopic.Spec.Topics) == 0 {
+		log.Info("No topics specified, skipping topic cleanup")
+		return nil
+	}
+
+	// Create Kafka connection
+	kafkaClient, err := k.CreateKafkaConnection(ctx, *kafkaTopic.Spec.BoostrapServer)
+	if err != nil {
+		log.Error(err, "Failed to create Kafka connection for cleanup")
+		// Don't fail the cleanup if we can't connect - the topics might already be cleaned up
+		// or the Kafka cluster might be unavailable
+		return nil
+	}
+	defer kafkaClient.Close()
+
+	admin := kadm.NewClient(kafkaClient)
+	defer admin.Close()
+
+	// Get list of topics to delete
+	var topicsToDelete []string
+	for _, topic := range *kafkaTopic.Spec.Topics {
+		topicsToDelete = append(topicsToDelete, topic.Topic)
+	}
+
+	log.Info("Deleting Kafka topics", "topics", topicsToDelete)
+
+	// Delete topics
+	deleteResp, err := admin.DeleteTopics(ctx, topicsToDelete...)
+	if err != nil {
+		log.Error(err, "Failed to delete topics")
+		return err
+	}
+
+	// Check if there were any errors during deletion
+	for topic, topicErr := range deleteResp {
+		if topicErr.Err != nil {
+			log.Error(topicErr.Err, "Failed to delete topic", "topic", topic)
+			// Continue with other topics even if one fails
+		} else {
+			log.Info("Successfully deleted topic", "topic", topic)
+		}
+	}
+
+	log.Info("Topic cleanup completed")
+	return nil
 }
 
 func (r *KafkaTopicReconciler) GetStatus(state kafkav1alpha1.State) metav1.ConditionStatus {
