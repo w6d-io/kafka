@@ -43,7 +43,7 @@ var _ webhook.CustomDefaulter = &KafkaTopic{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *KafkaTopic) Default(_ context.Context, _ runtime.Object) error {
-	kafkatopiclog.Info("default", "name", r.Name)
+	kafkatopiclog.Info("default", "name", r.ObjectMeta.Name)
 
 	// TODO(user): fill in your defaulting logic.
 
@@ -59,7 +59,7 @@ var _ webhook.CustomValidator = &KafkaTopic{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *KafkaTopic) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	kafkatopiclog.Info("validate create", "name", r.Name)
+	kafkatopiclog.Info("validate create", "name", r.ObjectMeta.Name)
 
 	// TODO(user): fill in your validation logic upon object creation.
 	return nil, nil
@@ -67,7 +67,7 @@ func (r *KafkaTopic) ValidateCreate(ctx context.Context, obj runtime.Object) (ad
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *KafkaTopic) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	kafkatopiclog.Info("validate update", "name", r.Name)
+	kafkatopiclog.Info("validate update", "name", r.ObjectMeta.Name)
 
 	// TODO(user): fill in your validation logic upon object update.
 	return nil, nil
@@ -75,7 +75,7 @@ func (r *KafkaTopic) ValidateUpdate(ctx context.Context, oldObj runtime.Object, 
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *KafkaTopic) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	kafkatopiclog.Info("validate delete", "name", r.Name)
+	kafkatopiclog.Info("validate delete", "name", r.ObjectMeta.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil, nil
