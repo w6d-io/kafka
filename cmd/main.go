@@ -57,6 +57,9 @@ func init() {
 }
 
 func main() {
+	var webhookHost string
+	var webhookPort int
+	var webhookCertDir string
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
@@ -65,6 +68,9 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
+	flag.IntVar(&webhookPort, "webhook-port", 9443, "The port the webhook endpoint binds to.")
+	flag.StringVar(&webhookHost, "webhook-host", "0.0.0.0", "The host the webhook endpoint binds to.")
+	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs", "The directory where the webhook TLS certs are stored.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -97,6 +103,9 @@ func main() {
 	}
 
 	webhookServer := webhook.NewServer(webhook.Options{
+		Host:    webhookHost,
+		Port:    webhookPort,
+		CertDir: "",
 		TLSOpts: tlsOpts,
 	})
 
@@ -154,6 +163,12 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KafkaTopic")
 		os.Exit(1)
+	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = (&kafkav1alpha1.KafkaTopic{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "KafkaTopic")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
